@@ -1,16 +1,14 @@
 export interface TreeDetectionRequest {
-  image: Express.Multer.File;
+  image_blob: Express.Multer.File;
   label: string;
   confidence: number;
   timestamp: number;
   latitude?: number;
   longitude?: number;
-  gpsAccuracy?: number;
-  virtualID?: string;
-  deviceId?: string;
   nonce?: string;
   counter?: number;
   signature?: string;
+  device_id?: string;
 }
 
 export interface TreeDetectionResponse {

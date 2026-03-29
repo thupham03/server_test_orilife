@@ -3,7 +3,6 @@ import multer from 'multer';
 import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
-import { v4 as uuidv4 } from 'uuid';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -36,7 +35,7 @@ let currentUploadFolder: string = '';
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
+  destination: (_req, _file, cb) => {
     const folderName = generateFolderName();
     currentUploadFolder = path.join(uploadsDir, folderName);
     if (!fs.existsSync(currentUploadFolder)) {
@@ -44,8 +43,10 @@ const storage = multer.diskStorage({
     }
     cb(null, currentUploadFolder);
   },
-  filename: (req, file, cb) => {
-    const uniqueName = `image.jpg`;
+  filename: (_req, file, cb) => {
+    // Giữ nguyên extension từ file upload (PNG)
+    const ext = path.extname(file.originalname) || '.png';
+    const uniqueName = `image${ext}`;
     cb(null, uniqueName);
   }
 });
@@ -75,23 +76,23 @@ const logRequest = (req: any, message: string) => {
   }
 
   // Read form fields (from multipart)
-  const label = req.body.label as string;
-  const boxCoordinates = req.body.box_coordinates as string;
-  const timestamp = req.body.timestamp as number;
+  const imageId = req.body.image_id as string;
+  const treeId = req.body.tree_id as string;
+  const timestamp = req.body.timestamp as string;
   const latitude = req.body.latitude ? parseFloat(req.body.latitude as string) : undefined;
   const longitude = req.body.longitude ? parseFloat(req.body.longitude as string) : undefined;
-  const confidence = req.body.confidence ? parseFloat(req.body.confidence as string) : undefined;
-  const counter = req.body.counter ? parseInt(req.body.counter as string) : undefined;
+  const heading = req.body.heading ? parseFloat(req.body.heading as string) : undefined;
+  const pitch = req.body.pitch ? parseFloat(req.body.pitch as string) : undefined;
+  const roll = req.body.roll ? parseFloat(req.body.roll as string) : undefined;
+  const nonce = req.body.nonce as string;
   const signature = req.body.signature as string;
   const deviceId = req.body.device_id as string;
-  const nonce = req.body.nonce as string;
 
-  // Log tree detection info
-  console.log('🌳 Tree Detection Info:');
-  console.log(`   Label: ${label || 'N/A'}`);
-  console.log(`   Box Coordinates: ${boxCoordinates || 'N/A'}`);
-  console.log(`   Confidence: ${confidence || 'N/A'}`);
-  console.log(`   Timestamp: ${timestamp || 'N/A'}`);
+  // Log payload fields
+  console.log('🔑 Payload Fields:');
+  console.log(`   image_id: ${imageId || 'N/A'}`);
+  console.log(`   tree_id: ${treeId || 'N/A'}`);
+  console.log(`   timestamp: ${timestamp || 'N/A'}`);
 
   // Log GPS info
   if (latitude || longitude) {
@@ -100,18 +101,27 @@ const logRequest = (req: any, message: string) => {
     console.log(`   Longitude: ${longitude || 'N/A'}`);
   }
 
+  // Log Orientation info
+  if (heading || pitch || roll) {
+    console.log('🧭 Orientation Info:');
+    console.log(`   Heading: ${heading !== undefined ? heading.toFixed(1) + '°' : 'N/A'}`);
+    console.log(`   Pitch: ${pitch !== undefined ? pitch.toFixed(1) + '°' : 'N/A'}`);
+    console.log(`   Roll: ${roll !== undefined ? roll.toFixed(1) + '°' : 'N/A'}`);
+  }
+
   // Log security info
   if (deviceId || nonce || signature) {
     console.log('🔒 Security Info:');
     console.log(`   Device ID: ${deviceId || 'N/A'}`);
     console.log(`   Nonce: ${nonce || 'N/A'}`);
-    console.log(`   Counter: ${counter || 'N/A'}`);
     console.log(`   Signature: ${signature ? signature.substring(0, 20) + '...' : 'N/A'}`);
   }
 };
 
 // Main endpoint: Receive tree detection with image
-app.post('/api/v1/detect-tree', upload.single('image_blob'), (req: any, res: Response) => {
+// ✅ Accept cả endpoint mới + endpoint cũ để tương thích mobile đang dùng /api/v1/detect-tree
+// ✅ Accept 'input_image' field name (matching Android client)
+app.post(['/api/v1/detection/upload', '/api/v1/detect-tree'], upload.single('input_image'), (req: any, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -122,19 +132,21 @@ app.post('/api/v1/detect-tree', upload.single('image_blob'), (req: any, res: Res
 
     logRequest(req, '📥 Received tree detection request');
 
-    // Generate tree ID
-    const treeId = `TREE_${uuidv4().substring(0, 8).toUpperCase()}`;
+    // image_id và tree_id được gửi từ app (đã generate trên device)
+    const imageId = req.body.image_id as string;
+    const treeId = req.body.tree_id as string;
 
     // Create JSON data from request body
     const jsonData = {
+      imageId: imageId,
       treeId: treeId,
-      label: req.body.label,
-      boxCoordinates: req.body.box_coordinates,
-      timestamp: req.body.timestamp,
-      latitude: req.body.latitude ? parseFloat(req.body.latitude) : undefined,
-      longitude: req.body.longitude ? parseFloat(req.body.longitude) : undefined,
-      confidence: req.body.confidence ? parseFloat(req.body.confidence) : undefined,
-      counter: req.body.counter ? parseInt(req.body.counter) : undefined,
+      timestamp: req.body.timestamp ? parseInt(req.body.timestamp as string) : undefined,
+      latitude: req.body.latitude ? parseFloat(req.body.latitude as string) : undefined,
+      longitude: req.body.longitude ? parseFloat(req.body.longitude as string) : undefined,
+      accuracy: req.body.accuracy ? parseFloat(req.body.accuracy as string) : undefined,
+      heading: req.body.heading ? parseFloat(req.body.heading as string) : undefined,
+      pitch: req.body.pitch ? parseFloat(req.body.pitch as string) : undefined,
+      roll: req.body.roll ? parseFloat(req.body.roll as string) : undefined,
       signature: req.body.signature,
       deviceId: req.body.device_id,
       nonce: req.body.nonce,
@@ -146,7 +158,9 @@ app.post('/api/v1/detect-tree', upload.single('image_blob'), (req: any, res: Res
     fs.writeFileSync(jsonFilePath, JSON.stringify(jsonData, null, 2));
 
     console.log('✅ Request processed successfully');
-    console.log(`   Generated Tree ID: ${treeId}`);
+    console.log(`   Image ID: ${imageId}`);
+    console.log(`   Tree ID: ${treeId}`);
+    console.log(`   Image saved to: ${req.file.path}`);
     console.log(`   JSON saved to: ${jsonFilePath}`);
     console.log('='.repeat(60) + '\n');
 
@@ -156,9 +170,10 @@ app.post('/api/v1/detect-tree', upload.single('image_blob'), (req: any, res: Res
     // Send response
     res.json({
       success: true,
+      imageId: imageId,
       treeId: treeId,
       folder: `/uploads/${folderName}`,
-      imagePath: `/uploads/${folderName}/image.jpg`,
+      imagePath: `/uploads/${folderName}/${req.file.filename}`,
       jsonPath: `/uploads/${folderName}/metadata.json`,
       message: 'Tree detection received and saved'
     });
@@ -174,7 +189,7 @@ app.post('/api/v1/detect-tree', upload.single('image_blob'), (req: any, res: Res
 });
 
 // Health check endpoint
-app.get('/health', (req: Request, res: Response) => {
+app.get('/health', (_req: Request, res: Response) => {
   console.log('🩺 Health check');
   res.json({
     status: 'OK',
@@ -183,6 +198,9 @@ app.get('/health', (req: Request, res: Response) => {
   });
 });
 
+// Serve uploaded files
+app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+
 // Start server
 app.listen(PORT, () => {
   console.log('\n' + '='.repeat(60));
@@ -190,6 +208,6 @@ app.listen(PORT, () => {
   console.log('='.repeat(60));
   console.log(`📡 Server running on: http://localhost:${PORT}`);
   console.log(`📂 Uploads directory: ${uploadsDir}`);
-  console.log(`📝 API Endpoint: POST http://localhost:${PORT}/api/v1/detect-tree`);
+  console.log(`📝 API Endpoints: POST http://localhost:${PORT}/api/v1/detection/upload  |  /api/v1/detect-tree`);
   console.log('='.repeat(60) + '\n');
 });
